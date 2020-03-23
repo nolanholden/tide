@@ -1,0 +1,21 @@
+[package]
+name = "tide"
+version = "0.1.0"
+authors = ["Nolan Holden <nolanholden@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+ip-address-player-ids = []
+
+default = []
+
+[dependencies]
+serde_json = "1.0"
+env_logger = "0.7.1"
+ws = "0.9.1"
+serde = { version = "1.0.105", features = ["derive"] }
+nalgebra = { version = "0.20.0", features = ["serde-serialize"] }
+ncollide2d = "0.22"
+approx = "0.3.2"
