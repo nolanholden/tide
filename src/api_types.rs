@@ -9,8 +9,8 @@ usage:
     {"type": "POSITION_UPDATE",
         "xy": [1.0, 2.0], "timeMs": 1232435 }
 
-    {"type": "BULLET_SHOT",
-        "bulletType": "HIT_SCAN0",
+    {"type": "PROJECTILE_CREATED",
+        "projectileType": "HIT_SCAN0",
         "origin": { "xy": [1.1, 2.1], "timeMs": 1232435 },
         "velocity": [0.707, 0.707] }
 
@@ -33,7 +33,7 @@ messages you'll receive:
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ClientUpdate {
     PositionUpdate(PositionStamped),
-    BulletShot(BulletSnaphot),
+    ProjectileCreated(ProjectileSnaphot),
     /// manual (server side) messages; client should not have access to these
     #[serde(skip)]
     PlayerConnected(()),
@@ -50,10 +50,10 @@ pub struct PositionStamped {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct BulletSnaphot {
-    pub bullet_type: BulletType,
+pub struct ProjectileSnaphot {
+    pub projectile_type: ProjectileType,
     pub origin: PositionStamped, // i.e. starts at the end of the gun barrel
-    pub velocity: Vec2, // treated as a unit vector (direction), velocity is given by BulletInfo
+    pub velocity: Vec2, // treated as a unit vector (direction), velocity is given by ProjectileInfo
 }
 
 pub type Vec2 = nalgebra::Vector2<f32>;
@@ -62,35 +62,37 @@ pub type Health = isize;
 
 #[derive(Copy, Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum BulletType {
+pub enum ProjectileType {
     HitScan0 = 0,
     Projectile0 = 1,
     // ...
 }
 
-pub mod bullet_info {
+pub mod projectile_info {
     #[derive(Debug)]
-    pub struct BulletInfo {
+    pub struct ProjectileInfo {
         pub speed: Option<f32>, // if None, this is hitscan (infinite speed)
         pub damage: super::Health,
-        /// number of enemies bullet will pass through, None indicates infinite
-        /// most bullets will likely be 1
+        /// number of enemies projectile will pass through, None indicates infinite
+        /// most projectiles will likely be 1
         pub num_penetrations: Option<isize>,
     }
-    static BULLET_INFOS: &'static [BulletInfo] = &[
-        BulletInfo {
+    static PROJECTILE_INFOS: &'static [ProjectileInfo] = &[
+        ProjectileInfo {
             speed: None,
             damage: 1,
             num_penetrations: Some(1),
         },
-        BulletInfo {
+        ProjectileInfo {
             speed: Some(2.0),
             damage: 10,
             num_penetrations: Some(1),
         },
     ];
-    pub fn lookup_bullet_info(bullet_type: super::BulletType) -> &'static BulletInfo {
-        &BULLET_INFOS[bullet_type as usize]
+    pub fn lookup_projectile_info(
+        projectile_type: super::ProjectileType,
+    ) -> &'static ProjectileInfo {
+        &PROJECTILE_INFOS[projectile_type as usize]
     }
 }
 
@@ -103,7 +105,7 @@ pub mod bullet_info {
 pub struct GameState {
     pub players: HashMap<PlayerId, Player>,
     pub enemies: Vec<Enemy>,
-    pub bullets: Vec<PlayerBullet>,
+    pub projectiles: Vec<PlayerProjectile>,
 }
 
 pub type PlayerId = String;
@@ -129,9 +131,9 @@ pub struct Player {
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct PlayerBullet {
+pub struct PlayerProjectile {
     pub player_id: PlayerId,
-    pub bullet: BulletSnaphot,
+    pub projectile: ProjectileSnaphot,
 }
 
 #[derive(Debug, Serialize)]

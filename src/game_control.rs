@@ -3,7 +3,7 @@ use crate::config;
 use crate::geography::GameMap;
 use crate::intercomm::ChannelUpdate;
 use crate::utils;
-use api::bullet_info::lookup_bullet_info;
+use api::projectile_info::lookup_projectile_info;
 use api_types as api;
 
 use ncollide2d as nc;
@@ -52,7 +52,7 @@ impl GameController {
             state: api::GameState {
                 players: HashMap::new(),
                 enemies: vec![],
-                bullets: vec![],
+                projectiles: vec![],
             },
         }
     }
@@ -66,25 +66,25 @@ impl GameController {
             api::ClientUpdate::PlayerConnected(()) => self.try_connect_player(id)?,
             api::ClientUpdate::PlayerDisconnected(()) => self.disconnect_player(id),
             api::ClientUpdate::PositionUpdate(position) => self.get_player(&id).position = position,
-            api::ClientUpdate::BulletShot(shot) => self.handle_bullet_shot(id, shot),
+            api::ClientUpdate::ProjectileCreated(proj) => self.handle_projectile_created(id, proj),
         };
         debug!(" --> state: {:?}", self.state.players);
         Ok(())
     }
 
-    pub fn progress_bullets(&mut self) -> Result<(), String> {
-        for player_bullet in self.state.bullets.iter_mut() {
-            let bullet: &mut api::BulletSnaphot = &mut player_bullet.bullet;
+    pub fn progress_projectiles(&mut self) -> Result<(), String> {
+        for player_projectile in self.state.projectiles.iter_mut() {
+            let projectile: &mut api::ProjectileSnaphot = &mut player_projectile.projectile;
             let now_ms = time::SystemTime::now()
                 .duration_since(time::UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64;
-            let delta_ms = now_ms - bullet.origin.time_ms;
+            let delta_ms = now_ms - projectile.origin.time_ms;
             let delta_secs = delta_ms as f32 / 1000.0;
-            bullet.origin.time_ms = now_ms;
-            // TODO: should we check if bullet would scan a target during the jump?
-            //    or just use ncollide2d? (see bullet_ray_scans_enemy())
-            bullet.origin.xy += bullet.velocity * (delta_secs);
+            projectile.origin.time_ms = now_ms;
+            // TODO: should we check if projectile would scan a target during the jump?
+            //    or just use ncollide2d? (see projectile_ray_scans_enemy())
+            projectile.origin.xy += projectile.velocity * (delta_secs);
         }
         Ok(())
     }
@@ -103,7 +103,7 @@ impl GameController {
 
         // TODO: can we give branch prediction compiler hint here? (in rust)
         while !cancelled() {
-            self.progress_bullets()?;
+            self.progress_projectiles()?;
             self.broadcast_state()?;
             // We'll wait as long as the full timeout for any client messages.
             // Thus, the timeout is the worst-case granularity of internal updates.
@@ -128,30 +128,34 @@ impl GameController {
     pub fn get_player(&mut self, id: &api::PlayerId) -> &mut api::Player {
         self.state.players.get_mut(id).unwrap()
     }
-    pub fn handle_bullet_shot(&mut self, id: api::PlayerId, bullet: api::BulletSnaphot) {
-        let bullet_info = lookup_bullet_info(bullet.bullet_type);
-        match bullet_info.speed {
+    pub fn handle_projectile_created(
+        &mut self,
+        id: api::PlayerId,
+        projectile: api::ProjectileSnaphot,
+    ) {
+        let projectile_info = lookup_projectile_info(projectile.projectile_type);
+        match projectile_info.speed {
             Some(speed) => {
                 // TODO: how do we handle possibility of crossing
                 // over enemies which should have been hit (due to
                 // insufficient granularity)
-                self.state.bullets.push(api::PlayerBullet {
+                self.state.projectiles.push(api::PlayerProjectile {
                     player_id: id,
-                    bullet: api::BulletSnaphot {
-                        bullet_type: bullet.bullet_type,
-                        origin: bullet.origin,
-                        velocity: bullet.velocity.normalize().scale(speed),
+                    projectile: api::ProjectileSnaphot {
+                        projectile_type: projectile.projectile_type,
+                        origin: projectile.origin,
+                        velocity: projectile.velocity.normalize().scale(speed),
                     },
                 });
             }
             None => {
                 let max_time_of_impact = self.map.max_dimension as f32;
-                let (mut in_bullet_path, _): (Vec<&mut api::Enemy>, Vec<&mut api::Enemy>) =
+                let (mut in_projectile_path, _): (Vec<&mut api::Enemy>, Vec<&mut api::Enemy>) =
                     self.state.enemies.iter_mut().partition(|ref enemy| {
-                        bullet_ray_scans_enemy(&bullet, enemy, max_time_of_impact)
+                        projectile_ray_scans_enemy(&projectile, enemy, max_time_of_impact)
                     });
-                for enemy in in_bullet_path.iter_mut() {
-                    enemy.health -= bullet_info.damage;
+                for enemy in in_projectile_path.iter_mut() {
+                    enemy.health -= projectile_info.damage;
                     if enemy.health <= 0 {
                         enemy.status = api::EnemyStatus::Dead;
                     }
@@ -202,8 +206,8 @@ impl GameController {
     }
 }
 
-pub fn bullet_ray_scans_enemy(
-    bullet: &api::BulletSnaphot,
+pub fn projectile_ray_scans_enemy(
+    projectile: &api::ProjectileSnaphot,
     enemy: &api::Enemy,
     max_time_of_impact: f32,
 ) -> bool {
@@ -215,14 +219,16 @@ pub fn bullet_ray_scans_enemy(
     let origin = Point::from(enemy.position.xy);
     let enemy_hit_boundary = nc::bounding_volume::aabb::AABB::new(origin, origin).loosened(0.5);
 
-    let bullet_ray =
-        nc::query::Ray::new(Point::from(bullet.origin.xy), bullet.velocity.normalize());
+    let projectile_ray = nc::query::Ray::new(
+        Point::from(projectile.origin.xy),
+        projectile.velocity.normalize(),
+    );
 
     // TODO: this currently shoots through walls, fix that
-    // TODO: implement max bullet penetration
+    // TODO: implement max projectile penetration
     enemy_hit_boundary.intersects_ray(
         &Isometry::identity(),
-        &bullet_ray,
+        &projectile_ray,
         max_time_of_impact, // e.g. scalar scaling of vector
     )
 }
