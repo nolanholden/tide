@@ -8,6 +8,8 @@ mod utils;
 
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate lazy_static;
 
 use std::sync::mpsc;
 

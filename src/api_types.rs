@@ -12,7 +12,7 @@ usage:
     {"type": "PROJECTILE_CREATED",
         "projectileType": "HIT_SCAN0",
         "origin": { "xy": [1.1, 2.1], "timeMs": 1232435 },
-        "velocity": [0.707, 0.707] }
+        "vel": [0.707, 0.707] }
 
     // ...
 
@@ -53,7 +53,7 @@ pub struct PositionStamped {
 pub struct ProjectileSnaphot {
     pub projectile_type: ProjectileType,
     pub origin: PositionStamped, // i.e. starts at the end of the gun barrel
-    pub velocity: Vec2, // treated as a unit vector (direction), velocity is given by ProjectileInfo
+    pub vel: Vec2, // treated as a unit vector (direction), vel is given by ProjectileInfo
 }
 
 pub type Vec2 = nalgebra::Vector2<f32>;
@@ -111,7 +111,7 @@ pub struct GameState {
 pub type PlayerId = String;
 
 #[derive(Debug)]
-pub enum AuthorizationState {
+pub enum AuthorizationStatus {
     #[allow(dead_code)]
     Unspecified = 0,
     GoodStanding = 1,
@@ -126,7 +126,7 @@ pub struct Player {
     pub connection_status: ConnectionStatus,
 
     #[serde(skip)]
-    pub authr_status: AuthorizationState,
+    pub authr_status: AuthorizationStatus,
 }
 
 #[derive(Serialize, Debug)]
@@ -158,6 +158,7 @@ pub struct Enemy {
 pub enum EnemyStatus {
     #[allow(dead_code)]
     Unspecified = 0,
-    _Alive = 1,
+    #[allow(dead_code)]
+    Alive = 1,  // TODO: spawn enemies
     Dead = 2,
 }

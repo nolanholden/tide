@@ -20,3 +20,5 @@ nalgebra = { version = "0.20.0", features = ["serde-serialize"] }
 ncollide2d = "0.22"
 approx = "0.3.2"
 log = "0.4.8"
+mio-extras = "2.0.6"
+lazy_static = "1.4.0"

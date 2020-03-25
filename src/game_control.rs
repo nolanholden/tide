@@ -84,7 +84,7 @@ impl GameController {
             projectile.origin.time_ms = now_ms;
             // TODO: should we check if projectile would scan a target during the jump?
             //    or just use ncollide2d? (see projectile_ray_scans_enemy())
-            projectile.origin.xy += projectile.velocity * (delta_secs);
+            projectile.origin.xy += projectile.vel * (delta_secs);
         }
         Ok(())
     }
@@ -111,7 +111,7 @@ impl GameController {
             // higher granularity to compensate.
             match self
                 .update_channel_rx
-                .recv_timeout(*config::AWAIT_CLIENT_MSG_TIMEOUT_MS())
+                .recv_timeout(config::AWAIT_CLIENT_MSG_TIMEOUT_MS())
             {
                 Ok(ChannelUpdate { id, update }) => self.handle_player_update(id, update)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -144,7 +144,7 @@ impl GameController {
                     projectile: api::ProjectileSnaphot {
                         projectile_type: projectile.projectile_type,
                         origin: projectile.origin,
-                        velocity: projectile.velocity.normalize().scale(speed),
+                        vel: projectile.vel.normalize().scale(speed),
                     },
                 });
             }
@@ -188,7 +188,7 @@ impl GameController {
                             time_ms: 0,
                         },
                         connection_status: api::ConnectionStatus::Connected,
-                        authr_status: api::AuthorizationState::GoodStanding,
+                        authr_status: api::AuthorizationStatus::GoodStanding,
                     },
                 );
             }
@@ -221,7 +221,7 @@ pub fn projectile_ray_scans_enemy(
 
     let projectile_ray = nc::query::Ray::new(
         Point::from(projectile.origin.xy),
-        projectile.velocity.normalize(),
+        projectile.vel.normalize(),
     );
 
     // TODO: this currently shoots through walls, fix that
