@@ -333,23 +333,6 @@ fn make_atomic_canceller() -> (impl Fn() -> bool, impl Fn() -> ()) {
 }
 
 #[cfg(feature = "ip-address-player-ids")]
-fn player_id_resolver(handshake: &ws::Handshake) -> ws::Result<PlayerId> {
-    let next_player_id = Mutex::new(1);
-    if cfg!(feature = "ip-address-player-ids") {
-        return Ok(handshake.remote_addr()?.unwrap());
-    } else {
-        let current_id: Option<_>;
-        {
-            let mut id = next_player_id.lock().unwrap();
-            current_id = Some(*id);
-            *id += 1;
-        }
-        return Ok(current_id.unwrap().to_string());
-    }
-}
-
-
-#[cfg(feature = "ip-address-player-ids")]
 struct PlayerIdResolver;
 #[cfg(not(feature = "ip-address-player-ids"))]
 struct PlayerIdResolver {
@@ -393,12 +376,6 @@ impl<'a> ws::Factory for ServerFactory<'a> {
         GameServer::new(sender, self.update_channel.clone(), self.player_id_resolver)
     }
 }
-// fn make_server_factory<'a>(
-//     update_channel: &'a mpsc::Sender<ChannelUpdate>,
-//     player_id_resolver: &'a PlayerIdResolver,
-// ) -> impl FnMut(ws::Sender) -> GameServer<'a> {
-//     move |sender| GameServer::new(sender, update_channel.clone(), player_id_resolver)
-// }
 
 fn start_game_update_daemon(
     mut game: GameUpdater,
