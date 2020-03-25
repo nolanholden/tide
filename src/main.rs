@@ -1,4 +1,5 @@
 mod api_types;
+mod config;
 use api::bullet_info::lookup_bullet_info;
 use api_types as api;
 
@@ -20,14 +21,6 @@ use std::time;
 #[derive(Debug)]
 struct GameMap {
     max_dimension: usize,
-}
-
-#[derive(Debug)]
-struct GameUpdater {
-    state: api::GameState,
-    map: GameMap,
-    update_channel_rx: mpsc::Receiver<ChannelUpdate>,
-    broadcaster: ws::Sender,
 }
 
 fn bullet_ray_scans_enemy(
@@ -55,7 +48,32 @@ fn bullet_ray_scans_enemy(
     )
 }
 
+#[derive(Debug)]
+struct GameUpdater {
+    update_channel_rx: mpsc::Receiver<ChannelUpdate>,
+    broadcaster: ws::Sender,
+    state: api::GameState,
+    map: GameMap,
+}
+
 impl GameUpdater {
+    fn new(
+        update_channel_rx: mpsc::Receiver<ChannelUpdate>,
+        broadcaster: ws::Sender,
+        map: GameMap,
+    ) -> GameUpdater {
+        GameUpdater {
+            update_channel_rx,
+            broadcaster: broadcaster,
+            map: map,
+            state: api::GameState {
+                players: HashMap::new(),
+                enemies: vec![],
+                bullets: vec![],
+            },
+        }
+    }
+
     fn handle_player_update(
         &mut self,
         id: api::PlayerId,
@@ -205,41 +223,38 @@ struct ChannelUpdate {
 }
 
 // websockets game server
-struct GameServer<'a, F: FnOnce(&ws::Handshake) -> ws::Result<api::PlayerId>> {
+struct GameServer<'a> {
     out: ws::Sender,
     update_channel: mpsc::Sender<ChannelUpdate>,
-    get_player_id: &'a F,
+    player_id_resolver: &'a PlayerIdResolver,
     player_id: Option<api::PlayerId>,
 }
 
-impl<'a, F: FnOnce(&ws::Handshake) -> ws::Result<api::PlayerId>> GameServer<'_, F> {
+impl<'a> GameServer<'_> {
     fn new(
         out: ws::Sender,
         update_channel: mpsc::Sender<ChannelUpdate>,
-        get_player_id: &'a F,
-    ) -> GameServer<F> {
+        player_id_resolver: &'a PlayerIdResolver,
+    ) -> GameServer {
         GameServer {
             out: out,
             update_channel: update_channel,
-            get_player_id: get_player_id,
+            player_id_resolver: player_id_resolver,
             player_id: None,
         }
     }
 }
 
-impl<F: FnOnce(&ws::Handshake) -> ws::Result<api::PlayerId>> GameServer<'_, F> {
+impl GameServer<'_> {
     fn send_out(&mut self, data: String) -> ws::Result<()> {
         debug!("server sending: [{}]", data);
         self.out.send(data)
     }
 }
 
-impl<F> ws::Handler for GameServer<'_, F>
-where
-    F: Fn(&ws::Handshake) -> ws::Result<api::PlayerId>,
-{
+impl ws::Handler for GameServer<'_> {
     fn on_open(&mut self, shake: ws::Handshake) -> ws::Result<()> {
-        let id: api::PlayerId = (self.get_player_id)(&shake)?;
+        let id: api::PlayerId = self.player_id_resolver.resolve_id(&shake)?;
         info!("Connection with [{}] now open", &id);
         self.player_id = Some(id.clone());
         self.update_channel
@@ -318,7 +333,7 @@ fn make_atomic_canceller() -> (impl Fn() -> bool, impl Fn() -> ()) {
 }
 
 #[cfg(feature = "ip-address-player-ids")]
-fn resolve_player_id(handshake: &ws::Handshake) -> ws::Result<PlayerId> {
+fn player_id_resolver(handshake: &ws::Handshake) -> ws::Result<PlayerId> {
     let next_player_id = Mutex::new(1);
     if cfg!(feature = "ip-address-player-ids") {
         return Ok(handshake.remote_addr()?.unwrap());
@@ -333,33 +348,57 @@ fn resolve_player_id(handshake: &ws::Handshake) -> ws::Result<PlayerId> {
     }
 }
 
+
 #[cfg(feature = "ip-address-player-ids")]
-fn make_player_id_resolver() -> impl Fn(&ws::Handshake) -> ws::Result<api::PlayerId> {
-    |handshake| Ok(handshake.remote_addr()?.unwrap())
+struct PlayerIdResolver;
+#[cfg(not(feature = "ip-address-player-ids"))]
+struct PlayerIdResolver {
+    next_player_id: Mutex<usize>,
+}
+
+#[cfg(feature = "ip-address-player-ids")]
+impl PlayerIdResolver {
+    fn new() {
+        PlayerIdResolver {}
+    }
+    fn resolve_id(&mut self, handshake: &ws::Handshake) -> ws::Result<api::PlayerId> {
+        Ok(handshake.remote_addr()?.unwrap())
+    }
 }
 #[cfg(not(feature = "ip-address-player-ids"))]
-fn make_player_id_resolver() -> impl Fn(&ws::Handshake) -> ws::Result<api::PlayerId> {
-    let next_player_id = Mutex::new(1);
-    return move |_handshake| {
+impl PlayerIdResolver {
+    fn new() -> PlayerIdResolver {
+        PlayerIdResolver {
+            next_player_id: Mutex::new(1),
+        }
+    }
+    fn resolve_id(&self, _handshake: &ws::Handshake) -> ws::Result<api::PlayerId> {
         let current_id: Option<_>;
         {
-            let mut id = next_player_id.lock().unwrap();
+            let mut id = self.next_player_id.lock().unwrap();
             current_id = Some(*id);
             *id += 1;
         }
         return Ok(current_id.unwrap().to_string());
-    };
+    }
 }
 
-fn make_server_factory<'a, T>(
+struct ServerFactory<'a> {
     update_channel: &'a mpsc::Sender<ChannelUpdate>,
-    resolve_player_id: &'a T,
-) -> impl FnMut(ws::Sender) -> GameServer<'a, T>
-where
-    T: FnOnce(&ws::Handshake) -> ws::Result<api::PlayerId>,
-{
-    move |sender| GameServer::new(sender, update_channel.clone(), resolve_player_id)
+    player_id_resolver: &'a PlayerIdResolver,
 }
+impl<'a> ws::Factory for ServerFactory<'a> {
+    type Handler = GameServer<'a>;
+    fn connection_made(&mut self, sender: ws::Sender) -> GameServer<'a> {
+        GameServer::new(sender, self.update_channel.clone(), self.player_id_resolver)
+    }
+}
+// fn make_server_factory<'a>(
+//     update_channel: &'a mpsc::Sender<ChannelUpdate>,
+//     player_id_resolver: &'a PlayerIdResolver,
+// ) -> impl FnMut(ws::Sender) -> GameServer<'a> {
+//     move |sender| GameServer::new(sender, update_channel.clone(), player_id_resolver)
+// }
 
 fn start_game_update_daemon(
     mut game: GameUpdater,
@@ -379,42 +418,51 @@ fn start_game_update_daemon(
     Ok(terminate_daemon)
 }
 
-mod config;
+fn parse_args() -> (String,) {
+    let args: Vec<String> = std::env::args().collect();
+    let socket_address = args[1].clone();
+    (socket_address,)
+}
+
+fn set_up_websockets_servers<'a>(
+    update_channel_tx: &'a mpsc::Sender<ChannelUpdate>,
+    player_id_resolver: &'a PlayerIdResolver,
+) -> (ws::WebSocket<ServerFactory<'a>>, ws::Sender) {
+    let server_factory = ServerFactory {
+        update_channel: &update_channel_tx,
+        player_id_resolver: &player_id_resolver,
+    };
+    let socket = ws::Builder::new().build(server_factory).unwrap();
+    let broadcaster = socket.broadcaster();
+    (socket, broadcaster)
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     config::init();
 
-    // Open interthread communication channel (between websockets servers and
-    // the update daemon).
-    let (update_channel_tx, update_channel_rx) = mpsc::channel();
-    let args: Vec<String> = std::env::args().collect();
-    let socket_address = &args[1];
+    let (socket_address,) = parse_args();
     info!("starting server, using address [{}]...", socket_address);
 
-    let player_id_resolver = make_player_id_resolver();
-    let server_factory = make_server_factory(&update_channel_tx, &player_id_resolver);
-    let socket = ws::Builder::new().build(server_factory).unwrap();
-    let broadcaster = socket.broadcaster();
-    // Start update daemon
-    let game = GameUpdater {
-        state: api::GameState {
-            players: HashMap::new(),
-            enemies: vec![],
-            bullets: vec![],
-        },
-        update_channel_rx,
-        map: GameMap { max_dimension: 100 },
-        broadcaster: broadcaster,
-    };
-    let terminate_fn = start_game_update_daemon(game)?;
+    // Create communication channel between websockets servers and
+    // the update daemon.
+    let (update_channel_tx, update_channel_rx) = mpsc::channel();
 
-    // start listening (on event loop)
+    // Configure websockets server(s).
+    let mut resolver = PlayerIdResolver::new();
+    let (socket, broadcaster) = set_up_websockets_servers(&update_channel_tx, &mut resolver);
+
+    // Start update daemon.
+    let map = GameMap { max_dimension: 100 };
+    let game = GameUpdater::new(update_channel_rx, broadcaster, map);
+    let terminate_update_daemon = start_game_update_daemon(game)?;
+
+    // Start listening (on event loop).
     if let Err(error) = socket.listen(socket_address) {
-        error!("failed to create WebSocket due to {:?}", error)
+        error!("failed to create websocket due to {:?}", error)
     }
 
-    // if the websockets server quit for some reason, terminate the update daemon
-    terminate_fn();
+    // If the websockets server quit for some reason, terminate the update daemon.
+    terminate_update_daemon();
 
     info!("server closed.");
     Ok(())

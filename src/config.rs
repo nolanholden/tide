@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use std::env;
-use ::std::time::Duration;
+use std::time::Duration;
 
 /// must be called *synchronously* before accessing any environment variables
 pub fn init() {
@@ -11,7 +11,7 @@ pub fn init() {
 
 macro_rules! define_env_var {
     ($name:ident, $type:ty, $default_value:expr) => {
-        pub mod $name {
+        mod $name {
             use ::std::time::Duration;
             pub static mut $name: $type = $default_value;
         }
@@ -22,10 +22,10 @@ macro_rules! define_env_var {
 }
 
 macro_rules! init_env_var {
-    ($name:ident, $parse_expr:expr) => {{
+    ($name:ident, $parse_closure:expr) => {{
         match env::var(stringify!($name)) {
             Ok(value) => {
-                $name::$name = ($parse_expr)(value);
+                $name::$name = ($parse_closure)(value);
             }
             Err(_) => {
                 warn!(
