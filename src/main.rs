@@ -127,7 +127,7 @@ impl GameUpdater {
             // higher granularity to compensate.
             match self
                 .update_channel_rx
-                .recv_timeout(*config::AWAIT_CLIENT_MSG_TIMEOUT())
+                .recv_timeout(*config::AWAIT_CLIENT_MSG_TIMEOUT_MS())
             {
                 Ok(ChannelUpdate { id, update }) => self.handle_player_update(id, update)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -373,6 +373,10 @@ struct ServerFactory<'a> {
 impl<'a> ws::Factory for ServerFactory<'a> {
     type Handler = GameServer<'a>;
     fn connection_made(&mut self, sender: ws::Sender) -> GameServer<'a> {
+        info!(
+            "connected with client, connection id=[{}]",
+            sender.connection_id()
+        );
         GameServer::new(sender, self.update_channel.clone(), self.player_id_resolver)
     }
 }
@@ -441,7 +445,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // If the websockets server quit for some reason, terminate the update daemon.
     terminate_update_daemon();
 
-    info!("server closed.");
+    info!("game server closed.");
     Ok(())
 }
 
