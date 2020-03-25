@@ -108,10 +108,23 @@ pub struct GameState {
 
 pub type PlayerId = String;
 
+#[derive(Debug)]
+pub enum AuthorizationState {
+    #[allow(dead_code)]
+    Unspecified = 0,
+    GoodStanding = 1,
+    #[allow(dead_code)]
+    FoulPlayDetected = 2, // TODO: control for malicious clients
+}
+
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Player {
     pub position: PositionStamped,
     pub connection_status: ConnectionStatus,
+
+    #[serde(skip)]
+    pub authr_status: AuthorizationState,
 }
 
 #[derive(Serialize, Debug)]
@@ -124,7 +137,8 @@ pub struct PlayerBullet {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConnectionStatus {
-    _Unspecified,
+    #[allow(dead_code)]
+    Unspecified,
     Connected,
     Disconnected,
 }
@@ -140,7 +154,8 @@ pub struct Enemy {
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EnemyStatus {
-    _Unspecified = 0,
+    #[allow(dead_code)]
+    Unspecified = 0,
     _Alive = 1,
     Dead = 2,
 }

@@ -4,6 +4,7 @@ use std::env;
 use std::time::Duration;
 
 /// must be called *synchronously* before accessing any environment variables
+/// (access is not synchronized)
 pub fn init() {
     env_logger::init();
     init_env_vars();
@@ -29,18 +30,10 @@ macro_rules! init_env_var {
         match env::var(stringify!($name)) {
             Ok(value) => {
                 $name::$name = ($parse_closure)(value);
-                info!(
-                    "{}=[{:?}]",
-                    stringify!($name),
-                    &$name::$name
-                );
+                info!("{}=[{:?}]", stringify!($name), &$name::$name);
             }
             Err(_) => {
-                warn!(
-                    "{} using default [{:?}]",
-                    stringify!($name),
-                    &$name::$name
-                );
+                warn!("{} using default [{:?}]", stringify!($name), &$name::$name);
             }
         }
     }};
@@ -54,8 +47,8 @@ define_env_var!(
 
 pub fn init_env_vars() {
     unsafe {
-        init_env_var!(AWAIT_CLIENT_MSG_TIMEOUT_MS, |s: String| Duration::from_millis(
-            s.parse().unwrap()
-        ));
+        init_env_var!(AWAIT_CLIENT_MSG_TIMEOUT_MS, |s: String| {
+            Duration::from_millis(s.parse().unwrap())
+        });
     }
 }
