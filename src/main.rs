@@ -24,14 +24,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("starting server, using address [{}]...", socket_address);
 
     // Create communication channel between websockets servers and
-    // the update daemon.
+    // the update game_controller.
     let (update_channel_tx, update_channel_rx) = mpsc::channel();
 
     // Configure websockets server(s).
     let resolver = utils::PlayerIdResolver::new();
     let (socket, broadcaster) = server::set_up_websockets_server(&update_channel_tx, &resolver);
 
-    // Start update daemon.
+    // Start update game_controller.
     let map = geography::GameMap { max_dimension: 100 };
     let game = game_control::GameController::new(update_channel_rx, broadcaster, map);
     let terminate_fn = game_control::start_game_controller_thread(game)?;
@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         error!("failed to create websocket due to {:?}", error)
     }
 
-    // If the websockets server quit for some reason, terminate the update daemon.
+    // If the websockets server quit for some reason, terminate the update game_controller.
     terminate_fn();
 
     info!("game server closed.");

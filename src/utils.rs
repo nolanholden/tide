@@ -19,9 +19,9 @@ use std::sync::Mutex;
 pub fn make_atomic_canceller() -> (impl Fn() -> bool, impl Fn() -> ()) {
     let cancel_flag = Arc::new(AtomicBool::new(false));
     let cancel_flag_receiver = cancel_flag.clone();
-    let update_daemon_is_cancelled = move || cancel_flag_receiver.load(Ordering::Relaxed);
-    let update_daemon_set_cancelled = move || cancel_flag.store(true, Ordering::Relaxed);
-    (update_daemon_is_cancelled, update_daemon_set_cancelled)
+    let cancelled = move || cancel_flag_receiver.load(Ordering::Relaxed);
+    let cancel = move || cancel_flag.store(true, Ordering::Relaxed);
+    (cancelled, cancel)
 }
 
 #[cfg(feature = "ip-address-player-ids")]

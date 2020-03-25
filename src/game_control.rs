@@ -16,19 +16,19 @@ use std::time;
 pub fn start_game_controller_thread(
     mut game: GameController,
 ) -> Result<impl FnOnce() -> (), Box<dyn std::error::Error>> {
-    let (update_daemon_is_cancelled, cancel_update_daemon) = utils::make_atomic_canceller();
-    let update_daemon = thread::Builder::new()
-        .name("GameUpdateDaemon".to_owned())
-        .spawn(move || game.loop_until_cancelled(update_daemon_is_cancelled))?;
-    let terminate_daemon = move || {
-        info!("requesting game update daemon thread to stop...");
-        cancel_update_daemon();
-        match update_daemon.join().unwrap() {
-            Err(details) => error!("game update daemon failed, details: [{}]", details),
-            Ok(_) => info!("game update daemon thread closed without error."),
+    let (game_controller_is_cancelled, cancel_game_controller) = utils::make_atomic_canceller();
+    let game_controller = thread::Builder::new()
+        .name("GameController".to_owned())
+        .spawn(move || game.loop_until_cancelled(game_controller_is_cancelled))?;
+    let terminate_game_controller = move || {
+        info!("requesting game controller thread to stop...");
+        cancel_game_controller();
+        match game_controller.join().unwrap() {
+            Err(details) => error!("game controller failed, details: [{}]", details),
+            Ok(_) => info!("game controller thread closed without error."),
         };
     };
-    Ok(terminate_daemon)
+    Ok(terminate_game_controller)
 }
 
 #[derive(Debug)]
@@ -99,7 +99,7 @@ impl GameController {
     }
 
     pub fn loop_until_cancelled<F: Fn() -> bool>(&mut self, cancelled: F) -> Result<(), String> {
-        info!("game update daemon started.");
+        info!("game controller started.");
 
         // TODO: can we give branch prediction compiler hint here? (in rust)
         while !cancelled() {
@@ -121,7 +121,7 @@ impl GameController {
             };
         }
 
-        info!("game updater daemon detected cancellation, terminating...");
+        info!("game updater game_controller detected cancellation, terminating...");
 
         Ok(())
     }
