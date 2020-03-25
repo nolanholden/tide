@@ -56,7 +56,7 @@ pub struct BulletSnaphot {
     pub velocity: Vec2, // treated as a unit vector (direction), velocity is given by BulletInfo
 }
 
-pub type Vec2 = na::Vector2<f32>;
+pub type Vec2 = nalgebra::Vector2<f32>;
 
 pub type Health = isize;
 

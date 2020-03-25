@@ -19,3 +19,4 @@ serde = { version = "1.0.105", features = ["derive"] }
 nalgebra = { version = "0.20.0", features = ["serde-serialize"] }
 ncollide2d = "0.22"
 approx = "0.3.2"
+log = "0.4.8"

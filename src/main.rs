@@ -2,13 +2,12 @@ mod api_types;
 use api::bullet_info::lookup_bullet_info;
 use api_types as api;
 
-extern crate approx;
-extern crate env_logger;
-extern crate nalgebra as na;
-extern crate ncollide2d as nc;
-extern crate ws;
+#[macro_use]
+extern crate log;
 
+use ncollide2d as nc;
 use serde_json;
+use ws;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,9 +16,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use std::time;
-use std::time::Duration;
-
-const AWAIT_CLIENT_MSG_TIMEOUT: Duration = Duration::from_millis(50);
 
 #[derive(Debug)]
 struct GameMap {
@@ -41,8 +37,8 @@ fn bullet_ray_scans_enemy(
 ) -> bool {
     use crate::nc::bounding_volume::BoundingVolume;
     use crate::nc::query::RayCast;
-    use na::geometry::Point;
     use nc::math::Isometry;
+    use nc::math::Point;
 
     let origin = Point::from(enemy.position.xy);
     let enemy_hit_boundary = nc::bounding_volume::aabb::AABB::new(origin, origin).loosened(0.5);
@@ -71,7 +67,7 @@ impl GameUpdater {
             api::ClientUpdate::PositionUpdate(position) => self.get_player(&id).position = position,
             api::ClientUpdate::BulletShot(shot) => self.handle_bullet_shot(id, shot),
         };
-        println!(" --> state: {:?}", self.state.players);
+        debug!(" --> state: {:?}", self.state.players);
         Ok(())
     }
     fn progress_bullets(&mut self) -> Result<(), String> {
@@ -101,7 +97,7 @@ impl GameUpdater {
     }
 
     fn loop_until_cancelled<F: Fn() -> bool>(&mut self, cancelled: F) -> Result<(), String> {
-        println!("game update daemon started.");
+        info!("game update daemon started.");
 
         // TODO: can we give branch prediction compiler hint here? (in rust)
         while !cancelled() {
@@ -113,7 +109,7 @@ impl GameUpdater {
             // higher granularity to compensate.
             match self
                 .update_channel_rx
-                .recv_timeout(AWAIT_CLIENT_MSG_TIMEOUT)
+                .recv_timeout(*config::AWAIT_CLIENT_MSG_TIMEOUT())
             {
                 Ok(ChannelUpdate { id, update }) => self.handle_player_update(id, update)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -123,7 +119,7 @@ impl GameUpdater {
             };
         }
 
-        println!("game updater daemon detected cancellation, terminating...");
+        info!("game updater daemon detected cancellation, terminating...");
 
         Ok(())
     }
@@ -233,7 +229,7 @@ impl<'a, F: FnOnce(&ws::Handshake) -> ws::Result<api::PlayerId>> GameServer<'_, 
 
 impl<F: FnOnce(&ws::Handshake) -> ws::Result<api::PlayerId>> GameServer<'_, F> {
     fn send_out(&mut self, data: String) -> ws::Result<()> {
-        println!("server sending: [{}]", data);
+        debug!("server sending: [{}]", data);
         self.out.send(data)
     }
 }
@@ -244,7 +240,7 @@ where
 {
     fn on_open(&mut self, shake: ws::Handshake) -> ws::Result<()> {
         let id: api::PlayerId = (self.get_player_id)(&shake)?;
-        println!("Connection with [{}] now open", &id);
+        info!("Connection with [{}] now open", &id);
         self.player_id = Some(id.clone());
         self.update_channel
             .send(ChannelUpdate {
@@ -260,7 +256,7 @@ where
     }
 
     fn on_message(&mut self, msg: ws::Message) -> ws::Result<()> {
-        println!("server got: [{}]", msg);
+        debug!("server got: [{}]", msg);
         let id = self.player_id.as_ref().unwrap();
         match msg {
             ws::Message::Text(json) => match serde_json::from_str(&json) {
@@ -290,8 +286,7 @@ where
     }
 
     fn on_close(&mut self, code: ws::CloseCode, reason: &str) {
-        println!("WebSocket closing for [{:?}], reason: [{}]", code, reason);
-        println!("Shutting down server after first connection closes.");
+        info!("WebSocket closing for [{:?}], reason: [{}]", code, reason);
         self.update_channel
             .send(ChannelUpdate {
                 id: self.player_id.as_ref().unwrap().clone(),
@@ -374,25 +369,27 @@ fn start_game_update_daemon(
         .name("GameUpdateDaemon".to_owned())
         .spawn(move || game.loop_until_cancelled(update_daemon_is_cancelled))?;
     let terminate_daemon = move || {
-        println!("requesting game update daemon thread to stop...");
+        info!("requesting game update daemon thread to stop...");
         cancel_update_daemon();
         match update_daemon.join().unwrap() {
-            Err(details) => println!("game update daemon failed, details: [{}]", details),
-            Ok(_) => println!("game update daemon thread closed without error."),
+            Err(details) => error!("game update daemon failed, details: [{}]", details),
+            Ok(_) => info!("game update daemon thread closed without error."),
         };
     };
     Ok(terminate_daemon)
 }
 
+mod config;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    config::init();
 
     // Open interthread communication channel (between websockets servers and
     // the update daemon).
     let (update_channel_tx, update_channel_rx) = mpsc::channel();
     let args: Vec<String> = std::env::args().collect();
     let socket_address = &args[1];
-    println!("starting server, using address [{}])...", socket_address);
+    info!("starting server, using address [{}]...", socket_address);
 
     let player_id_resolver = make_player_id_resolver();
     let server_factory = make_server_factory(&update_channel_tx, &player_id_resolver);
@@ -413,13 +410,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // start listening (on event loop)
     if let Err(error) = socket.listen(socket_address) {
-        println!("failed to create WebSocket due to {:?}", error)
+        error!("failed to create WebSocket due to {:?}", error)
     }
 
     // if the websockets server quit for some reason, terminate the update daemon
     terminate_fn();
 
-    println!("server closed.");
+    info!("server closed.");
     Ok(())
 }
 
