@@ -4,6 +4,7 @@ use crate::geography::GameMap;
 use crate::intercomm::ChannelUpdate;
 use crate::utils;
 use api::projectile_info::lookup_projectile_info;
+use api::Vec2;
 use api_types as api;
 
 use ncollide2d as nc;
@@ -85,7 +86,7 @@ impl GameController {
                     if *player_proj.current_info.num_penetrations.as_ref().unwrap() > 0 {
                         // Check if position update vector at all intersects the enemy bounding box
                         let projectile_hits_enemy =
-                            projectile_ray_scans_enemy(&player_proj.projectile, &enemy, 1.0);
+                            projectile_ray_scans_enemy(&player_proj.projectile, &enemy);
                         if projectile_hits_enemy {
                             // TODO: add way to optionally backoff/decrease {speed,damage} on the projectile
                             enemy.health -= player_proj.current_info.damage;
@@ -172,11 +173,11 @@ impl GameController {
                 });
             }
             None => {
-                let max_time_of_impact = self.map.max_dimension as f32;
                 let (mut in_projectile_path, _): (Vec<&mut api::Enemy>, Vec<&mut api::Enemy>) =
-                    self.state.enemies.iter_mut().partition(|ref enemy| {
-                        projectile_ray_scans_enemy(&projectile, enemy, max_time_of_impact)
-                    });
+                    self.state
+                        .enemies
+                        .iter_mut()
+                        .partition(|ref enemy| projectile_ray_scans_enemy(&projectile, enemy));
                 for enemy in in_projectile_path.iter_mut() {
                     enemy.health -= projectile_info.damage;
                     if enemy.health <= 0 {
@@ -229,29 +230,21 @@ impl GameController {
     }
 }
 
-pub fn projectile_ray_scans_enemy(
-    projectile: &api::ProjectileSnaphot,
-    enemy: &api::Enemy,
-    max_time_of_impact: f32,
-) -> bool {
-    use nc::bounding_volume::BoundingVolume;
+pub fn projectile_ray_scans_enemy(proj: &api::ProjectileSnaphot, enemy: &api::Enemy) -> bool {
     use nc::math::Isometry;
     use nc::math::Point;
     use nc::query::RayCast;
+    use nc::shape::shape::Shape;
+    use std::f32;
 
-    let origin = Point::from(enemy.position.xy);
-    let enemy_hit_boundary = nc::bounding_volume::aabb::AABB::new(origin, origin).loosened(0.5);
-
-    let projectile_ray = nc::query::Ray::new(
-        Point::from(projectile.origin.xy),
-        projectile.vel.normalize(),
-    );
-
+    let (half_width, half_height) = (0.5, 0.5);
+    let enemy_shape = nc::shape::Cuboid::new(Vec2::new(half_width, half_height));
+    let enemy_hit_boundary = enemy_shape.aabb(&Isometry::new(enemy.position.xy, 0f32));
+    let projectile_ray = nc::query::Ray::new(Point::from(proj.origin.xy), proj.vel.normalize());
     // TODO: this currently shoots through walls, fix that
-    // TODO: implement max projectile penetration
     enemy_hit_boundary.intersects_ray(
         &Isometry::identity(),
         &projectile_ray,
-        max_time_of_impact, // e.g. scalar scaling of vector
+        f32::MAX, // e.g. scalar scaling of vector
     )
 }
