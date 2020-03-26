@@ -63,9 +63,10 @@ impl GameServer<'_> {
 impl ws::Handler for GameServer<'_> {
     fn on_open(&mut self, shake: ws::Handshake) -> ws::Result<()> {
         let id: api::PlayerId = self.player_id_resolver.resolve_id(&shake)?;
-        info!("Connection with [{}] now open", &id);
+        info!("Connection with player [{}] now open", &id);
 
         // setup time sync timeouts
+        self.player_id = Some(id.clone());
         self.send_ping()?;
         self.out
             .timeout(config::WEBSOCKETS_PINGPONG_INTERVAL_MS(), PING)?;
@@ -75,13 +76,20 @@ impl ws::Handler for GameServer<'_> {
                 update: api::ClientUpdate::PlayerConnected(()),
             })
             .unwrap();
-        let message = format!(r#"{{"type": "YOUR_PLAYER_ID", "player_id": "{}"}}"#, id);
-        self.player_id = Some(id);
-        self.out.send(message)
+        let player_id_assignment_msg =
+            serde_json::ser::to_string(&api::ServerUpdate::YourPlayerId(api::PlayerIdMessage {
+                player_id: id,
+            }))
+            .unwrap();
+        self.out.send(player_id_assignment_msg)
     }
 
     fn on_message(&mut self, msg: ws::Message) -> ws::Result<()> {
-        debug!("server got: [{}]", msg);
+        debug!(
+            "server got from player [{}]: [{}]",
+            self.player_id.as_ref().unwrap(),
+            msg
+        );
         let id = self.player_id.as_ref().unwrap().clone();
         match msg {
             ws::Message::Text(json) => match serde_json::from_str(&json) {
@@ -91,8 +99,12 @@ impl ws::Handler for GameServer<'_> {
                         .unwrap();
                 }
                 Err(error) => {
-                    let error_msg =
-                        format!("unrecognized message: [{}], error: [{:?}]", json, error);
+                    let error_msg = format!(
+                        "unrecognized message from player [{}]: [{}], error: [{:?}]",
+                        self.player_id.as_ref().unwrap(),
+                        json,
+                        error
+                    );
                     warn!("{}", error_msg);
                     return self.send_out(error_msg);
                 }
@@ -180,11 +192,13 @@ impl ws::Handler for GameServer<'_> {
 
         // Inform all existing clients of this player being disconnected.
         // TODO: can we build in reconnection?
-        let message = format!(
-            r#"{{"type": "PLAYER_DISCONNECTED", "player_id": "{}"}}"#,
-            self.player_id.as_ref().unwrap()
-        );
-        self.out.broadcast(message).unwrap();
+        let player_disconnected_msg = serde_json::ser::to_string(
+            &api::ServerUpdate::PlayerDisconnected(api::PlayerIdMessage {
+                player_id: self.player_id.as_ref().unwrap().clone(),
+            }),
+        )
+        .unwrap();
+        self.out.broadcast(player_disconnected_msg).unwrap();
     }
 }
 

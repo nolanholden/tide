@@ -101,6 +101,20 @@ pub mod projectile_info {
 ///---------------------------///
 
 #[derive(Serialize, Debug)]
+#[serde(tag = "type")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ServerUpdate {
+    YourPlayerId(PlayerIdMessage),
+    PlayerDisconnected(PlayerIdMessage),
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerIdMessage {
+    pub player_id: PlayerId,
+}
+
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct GameState {
     pub players: HashMap<PlayerId, Player>,
@@ -159,6 +173,6 @@ pub enum EnemyStatus {
     #[allow(dead_code)]
     Unspecified = 0,
     #[allow(dead_code)]
-    Alive = 1,  // TODO: spawn enemies
+    Alive = 1, // TODO: spawn enemies
     Dead = 2,
 }
