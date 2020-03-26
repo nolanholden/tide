@@ -11,7 +11,6 @@ use ncollide2d as nc;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
-use std::time;
 
 pub fn start_game_controller_thread(
     mut game: GameController,
@@ -73,18 +72,41 @@ impl GameController {
     }
 
     pub fn progress_projectiles(&mut self) -> Result<(), String> {
-        for player_projectile in self.state.projectiles.iter_mut() {
-            let projectile: &mut api::ProjectileSnaphot = &mut player_projectile.projectile;
-            let now_ms = time::SystemTime::now()
-                .duration_since(time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64;
-            let delta_ms = now_ms - projectile.origin.time_ms;
+        let now_ms = utils::unix_time().as_millis() as u64;
+        let mut remaining_alive_enemies: Vec<&mut api::Enemy> =
+            self.state.enemies.iter_mut().collect();
+        for player_proj in self.state.projectiles.iter_mut() {
+            let delta_ms = now_ms - player_proj.projectile.origin.time_ms;
             let delta_secs = delta_ms as f32 / 1000.0;
-            projectile.origin.time_ms = now_ms;
-            // TODO: should we check if projectile would scan a target during the jump?
-            //    or just use ncollide2d? (see projectile_ray_scans_enemy())
-            projectile.origin.xy += projectile.vel * (delta_secs);
+            let pos_update_vector = player_proj.projectile.vel * delta_secs;
+            remaining_alive_enemies = remaining_alive_enemies
+                .into_iter()
+                .filter_map(|enemy: &mut api::Enemy| {
+                    if *player_proj.current_info.num_penetrations.as_ref().unwrap() > 0 {
+                        // Check if position update vector at all intersects the enemy bounding box
+                        let projectile_hits_enemy =
+                            projectile_ray_scans_enemy(&player_proj.projectile, &enemy, 1.0);
+                        if projectile_hits_enemy {
+                            // TODO: add way to optionally backoff/decrease {speed,damage} on the projectile
+                            enemy.health -= player_proj.current_info.damage;
+                            if enemy.health < 0 {
+                                enemy.status = api::EnemyStatus::Dead;
+                            }
+                            *player_proj.current_info.num_penetrations.as_mut().unwrap() -= 1;
+                        }
+                    }
+                    return match enemy.status {
+                        api::EnemyStatus::Alive => Some(enemy),
+                        api::EnemyStatus::Dead => None,
+                        api::EnemyStatus::Unspecified => panic!("invalid enemy state"),
+                    };
+                })
+                .collect();
+            // move the projectile forward
+            player_proj.projectile.origin = api::PositionStamped {
+                xy: player_proj.projectile.origin.xy + pos_update_vector,
+                time_ms: now_ms,
+            };
         }
         Ok(())
     }
@@ -146,6 +168,7 @@ impl GameController {
                         origin: projectile.origin,
                         vel: projectile.vel.normalize().scale(speed),
                     },
+                    current_info: projectile_info.clone(),
                 });
             }
             None => {

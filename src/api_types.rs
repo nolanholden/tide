@@ -69,7 +69,10 @@ pub enum ProjectileType {
 }
 
 pub mod projectile_info {
-    #[derive(Debug)]
+    use serde;
+    use serde::Serialize;
+
+    #[derive(Copy, Clone, Debug, Serialize)]
     pub struct ProjectileInfo {
         pub speed: Option<f32>, // if None, this is hitscan (infinite speed)
         pub damage: super::Health,
@@ -148,6 +151,7 @@ pub struct Player {
 pub struct PlayerProjectile {
     pub player_id: PlayerId,
     pub projectile: ProjectileSnaphot,
+    pub current_info: projectile_info::ProjectileInfo,
 }
 
 #[derive(Debug, Serialize)]
@@ -167,7 +171,7 @@ pub struct Enemy {
     pub health: Health,
     pub status: EnemyStatus,
 }
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EnemyStatus {
     #[allow(dead_code)]
