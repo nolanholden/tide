@@ -8,6 +8,10 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 
+pub fn unix_time_secs() -> f64 {
+    unix_time().as_secs() as f64
+}
+
 pub fn unix_time() -> Duration {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)

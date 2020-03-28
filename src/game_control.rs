@@ -12,22 +12,291 @@ use ncollide2d as nc;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
+
+use specs::prelude::*;
+use specs::Component;
+// use specs::{
+//     Builder, Component, DispatcherBuilder, Entities, Join, Read, ReadStorage, System, VecStorage,
+//     World, WorldExt, WriteStorage,
+// };
+
+#[derive(Debug, Component)]
+#[storage(VecStorage)]
+struct Position(Vec2);
+
+#[derive(Debug, Component)]
+#[storage(VecStorage)]
+struct Velocity(Vec2);
+
+#[derive(Default)]
+struct Receiver(Option<std::sync::Mutex<std::sync::mpsc::Receiver<ChannelUpdate>>>);
+
+#[derive(Default)]
+struct TimeDeltaSecs(f64);
+
+struct UpdatePosition;
+
+#[derive(Debug, Component)]
+#[storage(VecStorage)]
+struct Colliding(bool);
+
+impl<'a> System<'a> for UpdatePosition {
+    type SystemData = (
+        ReadStorage<'a, ProjectileEntity>,
+        ReadStorage<'a, Velocity>,
+        WriteStorage<'a, Position>,
+        Read<'a, TimeDeltaSecs>,
+    );
+    fn run(&mut self, (projectiles, vel, mut pos, delta): Self::SystemData) {
+        for (_, pos, vel) in (&projectiles, &mut pos, &vel).join() {
+            pos.0[0] = (vel.0[0] as f64 * delta.0) as f32;
+            pos.0[1] = (vel.0[1] as f64 * delta.0) as f32;
+        }
+    }
+}
+
+#[derive(Debug, Component)]
+#[storage(VecStorage)]
+struct PlayerEntity {
+    player_id: api::PlayerId,
+    connection_status: api::ConnectionStatus,
+}
+
+#[derive(Debug, Component)]
+#[storage(VecStorage)]
+struct ProjectileEntity {
+    proj_type: api::ProjectileType,
+}
+
+use specs::shrev::ReaderId;
+
+struct ClientUpdateHandler;
+impl ClientUpdateHandler {
+    fn handle_player_connection_updates<'a>(
+        &self,
+        id: api::PlayerId,
+        update: api::ClientUpdate,
+        players: WriteStorage<'a, PlayerEntity>,
+        entities: Entities<'a>,
+        updater: Read<'a, LazyUpdate>,
+    ) {
+        let add_new_player = || {
+            let new_player = entities.create();
+            updater.insert(
+                new_player,
+                PlayerEntity {
+                    player_id: id,
+                    connection_status: api::ConnectionStatus::Connected,
+                },
+            );
+            updater.insert(new_player, Position(Vec2::new(0.0, 0.0)));
+            updater.insert(new_player, Velocity(Vec2::new(0.0, 0.0)));
+        };
+        match update {
+            api::ClientUpdate::PlayerConnected(()) => {
+                match (&players).join().find(|p| p.player_id == id) {
+                    Some(player) => {
+                        if player.connection_status != api::ConnectionStatus::Disconnected {
+                            panic!("trying to reconnect to an existing id")
+                        }
+                        player.connection_status = api::ConnectionStatus::Connected;
+                    }
+                    None => {
+                        add_new_player();
+                    }
+                }
+            }
+            api::ClientUpdate::PlayerDisconnected(()) => {
+                match (&players).join().find(|p| p.player_id == id) {
+                    Some(player) => {
+                        if player.connection_status == api::ConnectionStatus::Disconnected {
+                            panic!("trying to disconnect an already-disconnected player");
+                        }
+                        player.connection_status = api::ConnectionStatus::Disconnected;
+                    }
+                    None => panic!("trying to disconnect a nonexistent player"),
+                };
+            }
+            _ => panic!("invalid type of update"),
+        };
+    }
+}
+
+impl<'a> System<'a> for ClientUpdateHandler {
+    type SystemData = (
+        Read<'a, Receiver>,
+        Entities<'a>,
+        Read<'a, LazyUpdate>,
+        WriteStorage<'a, PlayerEntity>,
+        WriteStorage<'a, Position>,
+        WriteStorage<'a, Velocity>,
+        WriteStorage<'a, ProjectileEntity>,
+    );
+    fn run(
+        &mut self,
+        (receiver,  entities, updater, players, positions, velocities, projectiles): Self::SystemData,
+    ) {
+        let channel = receiver.0.as_ref().unwrap().lock().unwrap();
+        loop {
+            let ChannelUpdate { id, update } = match channel.try_recv() {
+                Ok(x) => x,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    panic!("client update channel disconnected")
+                }
+            };
+            match update {
+                api::ClientUpdate::PlayerConnected(())
+                | api::ClientUpdate::PlayerDisconnected(()) => {
+                    self.handle_player_connection_updates(id, update, players, entities, updater)
+                }
+                api::ClientUpdate::PositionUpdate(update) => {
+                    (&players, &mut positions, &mut velocities).join().for_each(
+                        move |(player, pos, vel)| {
+                            if player.player_id == id {
+                                pos.0 = update.xy;
+                                vel.0 = update.vel;
+                            }
+                        },
+                    );
+                }
+                api::ClientUpdate::ProjectileCreated(proj) => {
+                    // TODO: how do we handle possibility of crossing
+                    // over enemies which should have been hit (due to
+                    // insufficient granularity)
+                    let e = entities.create();
+                    updater.insert(
+                        e,
+                        ProjectileEntity {
+                            proj_type: proj.projectile_type,
+                        },
+                    );
+                    updater.insert(e, Position(Vec2::new(0.0, 0.0)));
+                    updater.insert(e, Velocity(Vec2::new(0.0, 0.0)));
+                }
+            };
+        }
+    }
+}
+
+// #[derive(Default)]
+// struct Sys {
+//     reader: Option<ReaderId<ChannelUpdate>>,
+// }
+
+// impl<'a> System<'a> for Sys {
+//     type SystemData = Read<'a, cbc::Receiver<ChannelUpdate>>;
+
+//     fn run(&mut self, events: Self::SystemData) {
+//         for ChannelUpdate { id, update } in events.read(&mut self.reader.as_mut().unwrap()) {
+//             match update {
+//                 api::ClientUpdate::PlayerConnected(()) => self.try_connect_player(id)?,
+//                 api::ClientUpdate::PlayerDisconnected(()) => self.disconnect_player(id),
+//                 api::ClientUpdate::PositionUpdate(position) => {
+//                     self.get_player(&id).position = position
+//                 }
+//                 api::ClientUpdate::ProjectileCreated(proj) => {
+//                     self.handle_projectile_created(id, proj)
+//                 }
+//             };
+//         }
+//     }
+
+//     fn setup(&mut self, world: &mut World) {
+//         Self::SystemData::setup(world);
+//         self.reader = Some(
+//             world
+//                 .fetch_mut::<EventChannel<ChannelUpdate>>()
+//                 .register_reader(),
+//         );
+//     }
+// }
+
+#[derive(Default)]
+pub struct ComponentChangeObserver {
+    pub dirty: BitSet,
+    pub reader_id: Option<ReaderId<ComponentEvent>>,
+}
+
+#[derive(Debug)]
+pub struct HitScanProjectile;
+
+impl Component for HitScanProjectile {
+    type Storage = FlaggedStorage<Self, DenseVecStorage<Self>>;
+}
+
+impl<'a> System<'a> for ComponentChangeObserver {
+    type SystemData = (ReadStorage<'a, HitScanProjectile>,);
+
+    fn run(&mut self, (data,): Self::SystemData) {
+        self.dirty.clear();
+
+        let events = data.channel().read(self.reader_id.as_mut().unwrap());
+
+        // Note that we could use separate bitsets here, we only use one to
+        // simplify the example
+        for event in events {
+            match event {
+                ComponentEvent::Modified(id) | ComponentEvent::Inserted(id) => {
+                    self.dirty.add(*id);
+                }
+                // We don't need to take this event into account since
+                // removed components will be filtered out by the join;
+                // if you want to, you can use `self.dirty.remove(*id);`
+                // so the bit set only contains IDs that still exist
+                ComponentEvent::Removed(_) => (),
+            }
+        }
+
+        // for (d, other, _) in (&data, &mut some_other_data, &self.dirty).join() {
+        //     // Mutate `other` based on the update data in `d`
+        // }
+    }
+
+    fn setup(&mut self, res: &mut World) {
+        Self::SystemData::setup(res);
+        self.reader_id = Some(WriteStorage::<HitScanProjectile>::fetch(&res).register_reader());
+    }
+}
 
 pub fn start_game_controller_thread(
-    mut game: GameController,
+    receiver: mpsc::Receiver<ChannelUpdate>,
 ) -> Result<impl FnOnce() -> (), Box<dyn std::error::Error>> {
-    let (game_controller_is_cancelled, cancel_game_controller) = utils::make_atomic_canceller();
+    let (cancelled, cancel) = utils::make_atomic_canceller();
     let game_controller = thread::Builder::new()
         .name("GameController".to_owned())
-        .spawn(move || game.loop_until_cancelled(game_controller_is_cancelled))?;
+        .spawn(move || {
+            let mut world = World::new();
+            world.insert(Receiver(Some(std::sync::Mutex::new(receiver))));
+            use crossbeam_channel::unbounded;
+            let mut channel = unbounded::<ChannelUpdate>();
+            world.insert(channel);
+            world.register::<Position>();
+            world.register::<Velocity>();
+            let mut last_time = std::time::Instant::now();
+            let get_delta_time = move || {
+                let time_now = std::time::Instant::now();
+                let delta = time_now.duration_since(last_time);
+                last_time = time_now;
+                TimeDeltaSecs(delta.as_secs_f64())
+            };
+            let mut client_update_handler = ClientUpdateHandler;
+            let mut update_position = UpdatePosition;
+            while !cancelled() {
+                world.insert(get_delta_time());
+                client_update_handler.run_now(&world);
+                update_position.run_now(&world);
+                // dispatcher.dispatch(&mut world);
+                world.maintain();
+            }
+        })?;
     let terminate_game_controller = move || {
         info!("requesting game controller thread to stop...");
-        cancel_game_controller();
-        match game_controller.join().unwrap() {
-            Err(details) => error!("game controller failed, details: [{}]", details),
-            Ok(_) => info!("game controller thread closed without error."),
-        };
+        cancel();
+        game_controller.join().unwrap()
     };
+
     Ok(terminate_game_controller)
 }
 

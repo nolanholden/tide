@@ -10,6 +10,8 @@ mod utils;
 extern crate log;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate crossbeam_channel;
 
 use std::sync::mpsc;
 
@@ -36,7 +38,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start update game_controller.
     let map = geography::GameMap { max_dimension: 100 };
     let game = game_control::GameController::new(update_channel_rx, broadcaster, map);
-    let terminate_fn = game_control::start_game_controller_thread(game)?;
+    // let terminate_fn = game_control::start_game_controller_thread(game)?;
+    let terminate_fn = game_control::start_game_controller_thread(update_channel_rx)?;
 
     // Start listening (on event loop).
     if let Err(error) = socket.listen(socket_address) {

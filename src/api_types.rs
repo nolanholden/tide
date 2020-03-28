@@ -32,13 +32,21 @@ messages you'll receive:
 #[serde(tag = "type")]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ClientUpdate {
-    PositionUpdate(PositionStamped),
+    PositionUpdate(PlayerPositionUpdate),
     ProjectileCreated(ProjectileSnaphot),
     /// manual (server side) messages; client should not have access to these
     #[serde(skip)]
     PlayerConnected(()),
     #[serde(skip)]
     PlayerDisconnected(()),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerPositionUpdate {
+    pub xy: Vec2,
+    pub vel: Vec2,
+    pub time_ms: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -154,13 +162,13 @@ pub struct PlayerProjectile {
     pub current_info: projectile_info::ProjectileInfo,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConnectionStatus {
     #[allow(dead_code)]
-    Unspecified,
-    Connected,
-    Disconnected,
+    Unspecified = 0,
+    Connected = 1,
+    Disconnected = 2,
 }
 
 #[derive(Serialize, Debug)]

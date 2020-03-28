@@ -22,3 +22,5 @@ approx = "0.3.2"
 log = "0.4.8"
 mio-extras = "2.0.6"
 lazy_static = "1.4.0"
+specs = { version = "0.16.1", features = ["specs-derive"] }
+crossbeam-channel = "0.4.2"
