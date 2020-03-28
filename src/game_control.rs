@@ -16,13 +16,13 @@ use std::thread;
 pub fn start_game_controller_thread(
     mut game: GameController,
 ) -> Result<impl FnOnce() -> (), Box<dyn std::error::Error>> {
-    let (game_controller_is_cancelled, cancel_game_controller) = utils::make_atomic_canceller();
+    let (cancelled, cancel) = utils::make_atomic_canceller();
     let game_controller = thread::Builder::new()
         .name("GameController".to_owned())
-        .spawn(move || game.loop_until_cancelled(game_controller_is_cancelled))?;
+        .spawn(move || game.loop_until_cancelled(cancelled))?;
     let terminate_game_controller = move || {
         info!("requesting game controller thread to stop...");
-        cancel_game_controller();
+        cancel();
         match game_controller.join().unwrap() {
             Err(details) => error!("game controller failed, details: [{}]", details),
             Ok(_) => info!("game controller thread closed without error."),

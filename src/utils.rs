@@ -1,7 +1,5 @@
 use crate::api_types as api;
 
-use ws;
-
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -49,36 +47,68 @@ pub fn make_atomic_canceller() -> (impl Fn() -> bool, impl Fn() -> ()) {
     (cancelled, cancel)
 }
 
-#[cfg(feature = "ip-address-player-ids")]
-pub struct PlayerIdResolver;
-#[cfg(not(feature = "ip-address-player-ids"))]
-pub struct PlayerIdResolver {
-    next_player_id: Mutex<usize>,
+pub trait SerialIdGenerator {
+    const MASK: api::EntityId;
+
+    fn get_next_id(&self) -> api::EntityId {
+        let mut data = self.get_next_id_mutex().lock().unwrap();
+        let id = *data;
+        if (id & Self::MASK) != 0 {
+            panic!("overflow of ids, id=[{}], MASK=[{}]", id, Self::MASK);
+        }
+        *data += 1;
+        return id | Self::MASK;
+    }
+    fn new(first_id: api::EntityId) -> Self;
+    fn get_next_id_mutex(&self) -> &Mutex<api::EntityId>;
 }
 
-#[cfg(feature = "ip-address-player-ids")]
-impl PlayerIdResolver {
-    pub fn new() {
-        PlayerIdResolver {}
+/// u32 with first two bits: 00
+pub struct PlayerIdGenerator {
+    next_id: Mutex<api::EntityId>,
+}
+/// u32 with first two bits: 01
+pub struct EnemyIdGenerator {
+    next_id: Mutex<api::EntityId>,
+}
+/// u32 with first two bits: 1x (x is "don't care")
+///
+/// At 1,000 projectiles/seconds, this gives us:
+/// 3^31 / (1,000 projectiles/second) ~= 20,000 years of ids
+pub struct ProjectileIdGenerator {
+    next_id: Mutex<api::EntityId>,
+}
+
+impl SerialIdGenerator for PlayerIdGenerator {
+    const MASK: api::EntityId = 0b00 << (32 - 2);
+    fn get_next_id_mutex(&self) -> &Mutex<api::EntityId> {
+        &self.next_id
     }
-    pub fn resolve_id(&mut self, handshake: &ws::Handshake) -> ws::Result<api::PlayerId> {
-        Ok(handshake.remote_addr()?.unwrap())
+    fn new(first_id: api::EntityId) -> PlayerIdGenerator {
+        PlayerIdGenerator {
+            next_id: Mutex::new(first_id),
+        }
     }
 }
-#[cfg(not(feature = "ip-address-player-ids"))]
-impl PlayerIdResolver {
-    pub fn new() -> PlayerIdResolver {
-        PlayerIdResolver {
-            next_player_id: Mutex::new(1),
+impl SerialIdGenerator for EnemyIdGenerator {
+    const MASK: api::EntityId = 0b01 << (32 - 2);
+    fn get_next_id_mutex(&self) -> &Mutex<api::EntityId> {
+        &self.next_id
+    }
+    fn new(first_id: api::EntityId) -> EnemyIdGenerator {
+        EnemyIdGenerator {
+            next_id: Mutex::new(first_id),
         }
     }
-    pub fn resolve_id(&self, _handshake: &ws::Handshake) -> ws::Result<api::PlayerId> {
-        let current_id: Option<_>;
-        {
-            let mut id = self.next_player_id.lock().unwrap();
-            current_id = Some(*id);
-            *id += 1;
+}
+impl SerialIdGenerator for ProjectileIdGenerator {
+    const MASK: api::EntityId = 0b10 << (32 - 2);
+    fn get_next_id_mutex(&self) -> &Mutex<api::EntityId> {
+        &self.next_id
+    }
+    fn new(first_id: api::EntityId) -> ProjectileIdGenerator {
+        ProjectileIdGenerator {
+            next_id: Mutex::new(first_id),
         }
-        return Ok(current_id.unwrap().to_string());
     }
 }

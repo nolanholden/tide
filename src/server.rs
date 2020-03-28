@@ -2,6 +2,7 @@ use crate::api_types as api;
 use crate::config;
 use crate::intercomm::ChannelUpdate;
 use crate::utils;
+use crate::utils::SerialIdGenerator;
 
 use mio_extras::timer::Timeout;
 use ws;
@@ -11,11 +12,11 @@ use std::sync::mpsc;
 
 pub fn set_up_websockets_server<'a>(
     update_channel_tx: &'a mpsc::Sender<ChannelUpdate>,
-    player_id_resolver: &'a utils::PlayerIdResolver,
+    player_id_gen: &'a utils::PlayerIdGenerator,
 ) -> (ws::WebSocket<ServerFactory<'a>>, ws::Sender) {
     let server_factory = ServerFactory {
         update_channel: &update_channel_tx,
-        player_id_resolver: &player_id_resolver,
+        player_id_gen: player_id_gen,
     };
     let socket = ws::Builder::new().build(server_factory).unwrap();
     let broadcaster = socket.broadcaster();
@@ -28,28 +29,28 @@ const PING: Token = Token(1);
 pub struct GameServer<'a> {
     out: ws::Sender,
     update_channel: mpsc::Sender<ChannelUpdate>,
-    player_id_resolver: &'a utils::PlayerIdResolver,
     player_id: Option<api::PlayerId>,
     ping_timeout: Option<Timeout>,
+    player_id_gen: &'a utils::PlayerIdGenerator,
 }
 
-impl<'a> GameServer<'_> {
+impl<'a> GameServer<'a> {
     fn new(
         out: ws::Sender,
         update_channel: mpsc::Sender<ChannelUpdate>,
-        player_id_resolver: &'a utils::PlayerIdResolver,
-    ) -> GameServer {
+        player_id_gen: &'a utils::PlayerIdGenerator,
+    ) -> GameServer<'_> {
         GameServer {
             out: out,
             update_channel: update_channel,
-            player_id_resolver: player_id_resolver,
             player_id: None,
             ping_timeout: None,
+            player_id_gen: player_id_gen,
         }
     }
 }
 
-impl GameServer<'_> {
+impl<'a> GameServer<'_> {
     fn send_out(&mut self, data: String) -> ws::Result<()> {
         debug!("server sending: [{}]", data);
         self.out.send(data)
@@ -60,10 +61,10 @@ impl GameServer<'_> {
     }
 }
 
-impl ws::Handler for GameServer<'_> {
+impl<'a> ws::Handler for GameServer<'_> {
     fn on_open(&mut self, shake: ws::Handshake) -> ws::Result<()> {
-        let id: api::PlayerId = self.player_id_resolver.resolve_id(&shake)?;
-        info!("Connection with player [{}] now open", &id);
+        let id: api::PlayerId = self.player_id_gen.get_next_id();
+        info!("Connection with player [{}] now open, with ip addresses = {{ local=[{}], peer=[{}], remote=[{}] }}", &id, shake.local_addr.unwrap(), shake.peer_addr.unwrap(), shake.remote_addr()?.unwrap());
 
         // setup time sync timeouts
         self.player_id = Some(id.clone());
@@ -209,7 +210,7 @@ impl ws::Handler for DefaultHandler {}
 
 pub struct ServerFactory<'a> {
     update_channel: &'a mpsc::Sender<ChannelUpdate>,
-    player_id_resolver: &'a utils::PlayerIdResolver,
+    player_id_gen: &'a utils::PlayerIdGenerator,
 }
 
 impl<'a> ws::Factory for ServerFactory<'a> {
@@ -219,6 +220,6 @@ impl<'a> ws::Factory for ServerFactory<'a> {
             "connected with client, connection id=[{}]",
             sender.connection_id()
         );
-        GameServer::new(sender, self.update_channel.clone(), self.player_id_resolver)
+        GameServer::new(sender, self.update_channel.clone(), self.player_id_gen)
     }
 }

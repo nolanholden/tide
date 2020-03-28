@@ -125,7 +125,10 @@ pub struct GameState {
     pub projectiles: Vec<PlayerProjectile>,
 }
 
-pub type PlayerId = String;
+pub type EntityId = u32;
+pub type PlayerId = EntityId;
+pub type EnemyId = EntityId;
+pub type ProjectileId = EntityId;
 
 #[derive(Debug)]
 pub enum AuthorizationStatus {

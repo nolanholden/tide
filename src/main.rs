@@ -6,6 +6,8 @@ mod intercomm;
 mod server;
 mod utils;
 
+use crate::utils::SerialIdGenerator;
+
 #[macro_use]
 extern crate log;
 #[macro_use]
@@ -30,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (update_channel_tx, update_channel_rx) = mpsc::channel();
 
     // Configure websockets server(s).
-    let resolver = utils::PlayerIdResolver::new();
+    let resolver = utils::PlayerIdGenerator::new(1);
     let (socket, broadcaster) = server::set_up_websockets_server(&update_channel_tx, &resolver);
 
     // Start update game_controller.
